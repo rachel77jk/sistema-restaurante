@@ -19,15 +19,15 @@ if (!defined('BASE_PATH')) {
 
 // ==================== CONFIGURACION BD ====================
 define('DB_HOST', 'localhost');
-define('DB_USER', 'root');
-define('DB_PASS', '');
+define('DB_USER', 'restaurante_user');
+define('DB_PASS', 'TuPassword123!');
 define('DB_NAME', 'restaurante_inteligente');
 define('DB_CHARSET', 'utf8mb4');
 
 // ==================== CONFIGURACION APP ====================
 define('APP_NAME', 'Restaurante Inteligente');
 define('APP_VERSION', '4.0');
-define('APP_URL', 'http://localhost/restaurante_inteligente_v4');
+define('APP_URL', 'http://78.12.30.91');
 define('ADMIN_URL', APP_URL . '/admin');
 define('CLIENTE_URL', APP_URL . '/cliente');
 define('ASSETS_URL', APP_URL . '/assets');

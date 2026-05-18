@@ -3,8 +3,6 @@
  * LOGIN - Restaurante Inteligente v4
  * NO debe haber espacios ni saltos de linea antes de <?php
  */
-require_once "config/database.php";
-echo "Conexion exitosa";
 require_once 'includes/config.php';
 
 if (isLoggedIn()) {
