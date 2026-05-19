@@ -27,7 +27,7 @@ define('DB_CHARSET', 'utf8mb4');
 // ==================== CONFIGURACION APP ====================
 define('APP_NAME', 'Restaurante Inteligente');
 define('APP_VERSION', '4.0');
-define('APP_URL', 'http://78.12.30.91');
+define('APP_URL', 'http://78.12.240.135');
 define('ADMIN_URL', APP_URL . '/admin');
 define('CLIENTE_URL', APP_URL . '/cliente');
 define('ASSETS_URL', APP_URL . '/assets');
