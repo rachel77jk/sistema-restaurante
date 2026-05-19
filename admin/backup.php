@@ -1,7 +1,7 @@
 <?php
 /**
- * RESPALDO DE BASE DE DATOS - Restaurante Inteligente v4
- * Permite al administrador generar copias de seguridad de la base de datos
+ * RESPALDO Y RESTAURACION DE BASE DE DATOS - Restaurante Inteligente v4
+ * Permite al administrador generar copias de seguridad y restaurar la base de datos
  * Solo accesible para Administradores
  */
 require_once '../includes/config.php';
@@ -116,6 +116,101 @@ if (isset($_POST['crear_backup'])) {
     }
 }
 
+// ============================================================
+// PROCESAMIENTO DE RESTAURACION/IMPORTACION
+// ============================================================
+if (isset($_POST['restaurar_backup'])) {
+    try {
+        // Validar que se haya subido un archivo
+        if (!isset($_FILES['archivo_sql']) || $_FILES['archivo_sql']['error'] !== UPLOAD_ERR_OK) {
+            throw new Exception('Debe seleccionar un archivo SQL valido');
+        }
+
+        $archivo = $_FILES['archivo_sql'];
+        $extension = strtolower(pathinfo($archivo['name'], PATHINFO_EXTENSION));
+
+        // Validar extension
+        if ($extension !== 'sql') {
+            throw new Exception('El archivo debe tener extension .sql');
+        }
+
+        // Validar tamaño (max 50MB)
+        if ($archivo['size'] > 50 * 1024 * 1024) {
+            throw new Exception('El archivo es demasiado grande. Maximo 50MB');
+        }
+
+        // Leer contenido del archivo
+        $contenido = file_get_contents($archivo['tmp_name']);
+        if ($contenido === false || empty($contenido)) {
+            throw new Exception('No se pudo leer el archivo SQL');
+        }
+
+        // Limpiar contenido (eliminar BOM si existe)
+        $contenido = preg_replace('/^\xEF\xBB\xBF/', '', $contenido);
+
+        // Desactivar foreign key checks
+        $db->exec("SET FOREIGN_KEY_CHECKS = 0");
+
+        // Dividir en sentencias SQL
+        // Manejar correctamente los delimitadores y comentarios
+        $sentencias = parseSqlFile($contenido);
+
+        $totalSentencias = count($sentencias);
+        $ejecutadas = 0;
+        $errores = [];
+
+        foreach ($sentencias as $sql) {
+            $sql = trim($sql);
+            if (empty($sql)) continue;
+
+            try {
+                $db->exec($sql);
+                $ejecutadas++;
+            } catch (PDOException $e) {
+                // Ignorar errores de "tabla ya existe" o "no existe"
+                $errorMsg = $e->getMessage();
+                if (strpos($errorMsg, 'already exists') === false && 
+                    strpos($errorMsg, 'Unknown table') === false &&
+                    strpos($errorMsg, "doesn't exist") === false) {
+                    $errores[] = $errorMsg;
+                }
+            }
+        }
+
+        // Reactivar foreign key checks
+        $db->exec("SET FOREIGN_KEY_CHECKS = 1");
+
+        // Guardar log de restauracion
+        $logDir = dirname(__DIR__) . '/backups/logs/';
+        if (!is_dir($logDir)) {
+            mkdir($logDir, 0755, true);
+        }
+        $logFile = $logDir . 'restore_' . date('Y-m-d_H-i-s') . '.log';
+        $logContent = "RESTAURACION BD - " . date('d/m/Y H:i:s') . "\n";
+        $logContent .= "Usuario: " . $_SESSION['usuario_nombre'] . " ({$_SESSION['usuario_rol']})\n";
+        $logContent .= "Archivo: " . $archivo['name'] . "\n";
+        $logContent .= "Sentencias ejecutadas: {$ejecutadas}/{$totalSentencias}\n";
+        if (!empty($errores)) {
+            $logContent .= "Errores:\n" . implode("\n", array_slice($errores, 0, 10)) . "\n";
+        }
+        $logContent .= "----------------------------------------\n";
+        file_put_contents($logFile, $logContent);
+
+        if (!empty($errores) && count($errores) > 5) {
+            redirect('backup.php', 'warning', 'Restauracion completada con algunos errores (' . count($errores) . '). Revise el log.');
+        } else {
+            redirect('backup.php', 'success', 'Base de datos restaurada correctamente. Sentencias ejecutadas: ' . $ejecutadas);
+        }
+
+    } catch (Exception $e) {
+        // Asegurar que foreign keys se reactiven incluso en error
+        try {
+            $db->exec("SET FOREIGN_KEY_CHECKS = 1");
+        } catch (Exception $e2) {}
+        redirect('backup.php', 'error', 'Error al restaurar: ' . $e->getMessage());
+    }
+}
+
 // Eliminar un backup existente
 if (isset($_POST['eliminar_backup'])) {
     $archivo = basename($_POST['archivo']);
@@ -130,9 +225,70 @@ if (isset($_POST['eliminar_backup'])) {
 }
 
 // ============================================================
+// FUNCION AUXILIAR: Parsear archivo SQL
+// ============================================================
+function parseSqlFile($content) {
+    $sentencias = [];
+    $currentQuery = '';
+    $inDelimiter = false;
+    $delimiter = ';';
+    $lines = explode("\n", $content);
+
+    foreach ($lines as $line) {
+        $line = trim($line);
+
+        // Ignorar comentarios de linea simple
+        if (empty($line) || strpos($line, '--') === 0 || strpos($line, '#') === 0) {
+            continue;
+        }
+
+        // Manejar delimitadores (procedimientos almacenados, triggers)
+        if (stripos($line, 'DELIMITER ') === 0) {
+            $parts = preg_split('/\s+/', $line, 2);
+            $delimiter = trim($parts[1] ?? ';');
+            $inDelimiter = ($delimiter !== ';');
+            continue;
+        }
+
+        // Manejar comentarios multilinea
+        if (strpos($line, '/*') !== false) {
+            if (strpos($line, '*/') !== false) {
+                $line = preg_replace('/\/\*.*?\*\//', '', $line);
+                if (empty(trim($line))) continue;
+            } else {
+                // Inicio de bloque de comentario multilinea
+                continue;
+            }
+        }
+        if (strpos($line, '*/') !== false) {
+            continue; // Fin de bloque de comentario
+        }
+
+        $currentQuery .= $line . "\n";
+
+        // Verificar si la linea termina con el delimitador
+        if (substr($line, -strlen($delimiter)) === $delimiter) {
+            if ($delimiter !== ';') {
+                // En modo delimitador custom, quitar el delimitador y agregar ;
+                $currentQuery = str_replace($delimiter, ';', $currentQuery);
+            }
+            $sentencias[] = trim($currentQuery);
+            $currentQuery = '';
+        }
+    }
+
+    // Agregar ultima sentencia si quedo pendiente
+    if (!empty(trim($currentQuery))) {
+        $sentencias[] = trim($currentQuery);
+    }
+
+    return $sentencias;
+}
+
+// ============================================================
 // AQUI EMPIEZA EL OUTPUT HTML
 // ============================================================
-$pageTitle = 'Respaldo de Base de Datos';
+$pageTitle = 'Respaldo y Restauracion de Base de Datos';
 require_once 'header.php';
 
 // Listar backups existentes
@@ -172,8 +328,8 @@ function formatBytes($bytes) {
 }
 ?>
 
-<h1 class="page-title"><i class="fas fa-database"></i> Respaldo de Base de Datos</h1>
-<p class="page-subtitle">Genera copias de seguridad de toda la informacion del sistema</p>
+<h1 class="page-title"><i class="fas fa-database"></i> Respaldo y Restauracion de Base de Datos</h1>
+<p class="page-subtitle">Genera copias de seguridad o restaura la base de datos desde un archivo SQL</p>
 
 <!-- Estadisticas de la BD -->
 <div class="stats-grid">
@@ -235,66 +391,115 @@ function formatBytes($bytes) {
         </div>
     </div>
 
-    <!-- Lista de Respaldos Existentes -->
+    <!-- Panel de Restaurar/Importar -->
     <div class="card">
         <div class="card-header">
-            <h3><i class="fas fa-history"></i> Respaldos Existentes</h3>
+            <h3><i class="fas fa-cloud-upload-alt"></i> Restaurar Base de Datos</h3>
         </div>
         <div class="card-body">
-            <?php if (!empty($backups)): ?>
-            <div class="table-responsive">
-                <table class="table">
-                    <thead>
-                        <tr>
-                            <th>Nombre del Archivo</th>
-                            <th>Tamano</th>
-                            <th>Fecha</th>
-                            <th>Acciones</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <?php foreach ($backups as $backup): 
-                            // Extraer info del nombre del archivo
-                            preg_match('/backup_(.+?)_(\d{4}-\d{2}-\d{2})_(\d{2}-\d{2}-\d{2})\.sql/', $backup['nombre'], $matches);
-                            $dbName = $matches[1] ?? 'desconocido';
-                            $fechaStr = isset($matches[2]) ? str_replace('-', '/', $matches[2]) : '';
-                            $horaStr = isset($matches[3]) ? str_replace('-', ':', $matches[3]) : '';
-                        ?>
-                        <tr>
-                            <td>
-                                <i class="fas fa-file-code" style="color: var(--color-primary);"></i>
-                                <strong><?php echo $backup['nombre']; ?></strong>
-                                <br><small class="text-muted">BD: <?php echo $dbName; ?></small>
-                            </td>
-                            <td><span class="badge badge-info"><?php echo formatBytes($backup['tamano']); ?></span></td>
-                            <td><?php echo date('d/m/Y H:i', $backup['fecha']); ?></td>
-                            <td>
-                                <div class="d-flex gap-1">
-                                    <a href="../backups/<?php echo $backup['nombre']; ?>" download class="btn btn-sm btn-primary" title="Descargar">
-                                        <i class="fas fa-download"></i>
-                                    </a>
-                                    <form method="POST" style="display: inline;" onsubmit="return confirm('Eliminar este respaldo?');">
-                                        <input type="hidden" name="eliminar_backup" value="1">
-                                        <input type="hidden" name="archivo" value="<?php echo $backup['nombre']; ?>">
-                                        <button type="submit" class="btn btn-sm btn-danger" title="Eliminar">
-                                            <i class="fas fa-trash"></i>
-                                        </button>
-                                    </form>
-                                </div>
-                            </td>
-                        </tr>
-                        <?php endforeach; ?>
-                    </tbody>
-                </table>
+            <div class="empty-state" style="padding: 2rem;">
+                <i class="fas fa-upload" style="font-size: 4rem; color: var(--color-danger);"></i>
+                <h3 style="margin-top: 1rem;">Recuperacion de Datos</h3>
+                <p style="color: var(--color-gray); margin: 1rem 0;">
+                    Suba un archivo SQL para restaurar la base de datos completa.
+                    <strong style="color: var(--color-danger);">Esta accion reemplazara todos los datos actuales.</strong>
+                </p>
+
+                <div style="background: #fff3cd; border: 1px solid #ffc107; border-radius: var(--radius-sm); padding: 1rem; margin: 1rem 0; text-align: left;">
+                    <p style="margin: 0.3rem 0; font-size: 0.9rem; color: #856404;">
+                        <i class="fas fa-exclamation-triangle"></i> <strong>Advertencia:</strong> Todos los datos actuales seran eliminados y reemplazados.
+                    </p>
+                    <p style="margin: 0.3rem 0; font-size: 0.9rem; color: #856404;">
+                        <i class="fas fa-check"></i> Asegurese de tener un respaldo reciente antes de continuar.
+                    </p>
+                    <p style="margin: 0.3rem 0; font-size: 0.9rem; color: #856404;">
+                        <i class="fas fa-check"></i> Solo archivos .sql generados por este sistema o compatibles.
+                    </p>
+                    <p style="margin: 0.3rem 0; font-size: 0.9rem; color: #856404;">
+                        <i class="fas fa-check"></i> Tamano maximo: 50MB.
+                    </p>
+                </div>
+
+                <form method="POST" enctype="multipart/form-data" style="margin-top: 1.5rem;" onsubmit="return confirmarRestauracion()">
+                    <div class="form-group" style="text-align: left;">
+                        <label class="form-label">Seleccionar archivo SQL</label>
+                        <input type="file" name="archivo_sql" class="form-control" accept=".sql" required 
+                               onchange="validarArchivo(this)" id="archivoSql">
+                        <small class="text-muted" id="archivoInfo" style="display: block; margin-top: 0.5rem;"></small>
+                    </div>
+
+                    <button type="submit" name="restaurar_backup" class="btn btn-danger btn-lg btn-block" style="margin-top: 1rem;">
+                        <i class="fas fa-upload"></i> Restaurar Base de Datos
+                    </button>
+                </form>
+
+                <p style="font-size: 0.8rem; color: var(--color-gray); margin-top: 1rem;">
+                    <i class="fas fa-clock"></i> El proceso puede tardar varios minutos dependiendo del tamano.
+                </p>
             </div>
-            <?php else: ?>
-            <div class="empty-state">
-                <i class="fas fa-folder-open" style="font-size: 4rem;"></i>
-                <h3>No hay respaldos guardados</h3>
-                <p>Los respaldos generados se guardaran aqui automaticamente</p>
-            </div>
-            <?php endif; ?>
         </div>
+    </div>
+</div>
+
+<!-- Lista de Respaldos Existentes -->
+<div class="card mt-3">
+    <div class="card-header">
+        <h3><i class="fas fa-history"></i> Respaldos Existentes</h3>
+    </div>
+    <div class="card-body">
+        <?php if (!empty($backups)): ?>
+        <div class="table-responsive">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Nombre del Archivo</th>
+                        <th>Tamano</th>
+                        <th>Fecha</th>
+                        <th>Acciones</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php foreach ($backups as $backup): 
+                        // Extraer info del nombre del archivo
+                        preg_match('/backup_(.+?)_(\d{4}-\d{2}-\d{2})_(\d{2}-\d{2}-\d{2})\.sql/', $backup['nombre'], $matches);
+                        $dbName = $matches[1] ?? 'desconocido';
+                        $fechaStr = isset($matches[2]) ? str_replace('-', '/', $matches[2]) : '';
+                        $horaStr = isset($matches[3]) ? str_replace('-', ':', $matches[3]) : '';
+                    ?>
+                    <tr>
+                        <td>
+                            <i class="fas fa-file-code" style="color: var(--color-primary);"></i>
+                            <strong><?php echo $backup['nombre']; ?></strong>
+                            <br><small class="text-muted">BD: <?php echo $dbName; ?></small>
+                        </td>
+                        <td><span class="badge badge-info"><?php echo formatBytes($backup['tamano']); ?></span></td>
+                        <td><?php echo date('d/m/Y H:i', $backup['fecha']); ?></td>
+                        <td>
+                            <div class="d-flex gap-1">
+                                <a href="../backups/<?php echo $backup['nombre']; ?>" download class="btn btn-sm btn-primary" title="Descargar">
+                                    <i class="fas fa-download"></i>
+                                </a>
+                                <form method="POST" style="display: inline;" onsubmit="return confirm('Eliminar este respaldo?');">
+                                    <input type="hidden" name="eliminar_backup" value="1">
+                                    <input type="hidden" name="archivo" value="<?php echo $backup['nombre']; ?>">
+                                    <button type="submit" class="btn btn-sm btn-danger" title="Eliminar">
+                                        <i class="fas fa-trash"></i>
+                                    </button>
+                                </form>
+                            </div>
+                        </td>
+                    </tr>
+                    <?php endforeach; ?>
+                </tbody>
+            </table>
+        </div>
+        <?php else: ?>
+        <div class="empty-state">
+            <i class="fas fa-folder-open" style="font-size: 4rem;"></i>
+            <h3>No hay respaldos guardados</h3>
+            <p>Los respaldos generados se guardaran aqui automaticamente</p>
+        </div>
+        <?php endif; ?>
     </div>
 </div>
 
@@ -326,5 +531,44 @@ function formatBytes($bytes) {
         </div>
     </div>
 </div>
+
+<script>
+function validarArchivo(input) {
+    var info = document.getElementById('archivoInfo');
+    if (input.files && input.files[0]) {
+        var file = input.files[0];
+        var sizeMB = (file.size / (1024 * 1024)).toFixed(2);
+        var extension = file.name.split('.').pop().toLowerCase();
+        
+        if (extension !== 'sql') {
+            info.innerHTML = '<span style="color: var(--color-danger);"><i class="fas fa-times-circle"></i> El archivo debe ser .sql</span>';
+            input.value = '';
+            return false;
+        }
+        
+        if (file.size > 50 * 1024 * 1024) {
+            info.innerHTML = '<span style="color: var(--color-danger);"><i class="fas fa-times-circle"></i> El archivo excede 50MB</span>';
+            input.value = '';
+            return false;
+        }
+        
+        info.innerHTML = '<span style="color: var(--color-success);"><i class="fas fa-check-circle"></i> ' + 
+                         file.name + ' (' + sizeMB + ' MB)</span>';
+        return true;
+    }
+    info.innerHTML = '';
+}
+
+function confirmarRestauracion() {
+    var archivo = document.getElementById('archivoSql').value;
+    if (!archivo) {
+        alert('Debe seleccionar un archivo SQL');
+        return false;
+    }
+    return confirm('ATENCION: Esta accion reemplazara TODA la base de datos actual.\n\n' +
+                   'Todos los datos actuales seran eliminados.\n' +
+                   '¿Esta completamente seguro de continuar?');
+}
+</script>
 
 <?php require_once 'footer.php'; ?>
