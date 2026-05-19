@@ -98,7 +98,9 @@ if (isset($_POST['crear_backup'])) {
         $sql .= "-- ============================================\n";
 
         // Guardar archivo
-        file_put_contents($rutaArchivo, $sql);
+        if (file_put_contents($rutaArchivo, $sql) === false) {
+            throw new Exception('No se pudo escribir el archivo de respaldo');
+        }
 
         // Descargar el archivo
         header('Content-Type: application/octet-stream');
