@@ -116,6 +116,10 @@ $pedidos_listos_hoy = $db->query("SELECT COUNT(*) FROM pedidos WHERE DATE(fecha_
     align-items: center;
     gap: 5px;
 }
+.pedido-meta .cliente {
+    font-weight: 600;
+    color: var(--color-secondary);
+}
 
 .item-list {
     list-style: none;
@@ -253,8 +257,10 @@ $pedidos_listos_hoy = $db->query("SELECT COUNT(*) FROM pedidos WHERE DATE(fecha_
                 </div>
                 <div class="pedido-body">
                     <div class="pedido-meta">
-                        <span><i class="fas fa-user"></i> <?php echo $pedido['cliente_nombre'] ?: 'Sin cliente'; ?></span>
-                        <span><i class="fas fa-chair"></i> <?php echo $pedido['mesa_numero'] ?: 'N/A'; ?></span>
+                        <span class="cliente"><i class="fas fa-user"></i> <?php echo $pedido['cliente_nombre'] ?: 'Sin cliente'; ?></span>
+                        <span><i class="fas fa-<?php echo $pedido['tipo'] == 'Mesa' ? 'chair' : 'shopping-bag'; ?>"></i> 
+                            <?php echo $pedido['tipo'] == 'Mesa' ? ($pedido['mesa_numero'] ?: 'Sin mesa') : 'Para Llevar'; ?>
+                        </span>
                         <span><i class="fas fa-tag"></i> <?php echo $pedido['tipo']; ?></span>
                     </div>
 

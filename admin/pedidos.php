@@ -114,7 +114,6 @@ $pedidos = $result['data'];
             <select name="tipo" class="form-control" style="max-width: 150px;" onchange="this.form.submit()">
                 <option value="">Todos los tipos</option>
                 <option value="Mesa" <?php echo $tipo_filter == 'Mesa' ? 'selected' : ''; ?>>Mesa</option>
-                <option value="Domicilio" <?php echo $tipo_filter == 'Domicilio' ? 'selected' : ''; ?>>Domicilio</option>
                 <option value="ParaLlevar" <?php echo $tipo_filter == 'ParaLlevar' ? 'selected' : ''; ?>>Para Llevar</option>
             </select>
             <input type="date" name="desde" class="form-control" value="<?php echo $fecha_desde; ?>" style="max-width: 150px;" onchange="this.form.submit()">
@@ -139,8 +138,7 @@ $pedidos = $result['data'];
                     <tr>
                         <th>ID</th>
                         <th>Cliente</th>
-                        <th>Mesa</th>
-                        <th>Tipo</th>
+                        <th>Mesa/Tipo</th>
                         <th>Total</th>
                         <th>Estado</th>
                         <th>Fecha</th>
@@ -151,12 +149,11 @@ $pedidos = $result['data'];
                     <?php foreach ($pedidos as $p): ?>
                     <tr>
                         <td><strong>#<?php echo $p['id']; ?></strong></td>
-                        <td><?php echo $p['cliente_nombre'] ?: '<span class="text-muted">Sin cliente</span>'; ?></td>
-                        <td><?php echo $p['mesa_numero'] ?: 'N/A'; ?></td>
+                        <td><i class="fas fa-user"></i> <?php echo $p['cliente_nombre'] ?: '<span class="text-muted">Sin cliente</span>'; ?></td>
                         <td>
-                            <span class="badge badge-<?php echo $p['tipo'] == 'Mesa' ? 'primary' : ($p['tipo'] == 'Domicilio' ? 'info' : 'warning'); ?>">
-                                <i class="fas fa-<?php echo $p['tipo'] == 'Mesa' ? 'chair' : ($p['tipo'] == 'Domicilio' ? 'motorcycle' : 'shopping-bag'); ?>"></i>
-                                <?php echo $p['tipo']; ?>
+                            <span class="badge badge-<?php echo $p['tipo'] == 'Mesa' ? 'primary' : 'warning'; ?>">
+                                <i class="fas fa-<?php echo $p['tipo'] == 'Mesa' ? 'chair' : 'shopping-bag'; ?>"></i>
+                                <?php echo $p['tipo'] == 'Mesa' ? ($p['mesa_numero'] ?: 'Sin mesa') : 'Para Llevar'; ?>
                             </span>
                         </td>
                         <td><strong class="text-primary"><?php echo formatMoney($p['total']); ?></strong></td>
@@ -248,8 +245,14 @@ $pedidos = $result['data'];
                     <p><strong><i class="fas fa-phone"></i> Telefono:</strong> <?php echo $pedido_detalle['cliente_telefono'] ?: 'N/A'; ?></p>
                 </div>
                 <div>
+                    <p><strong><i class="fas fa-<?php echo $pedido_detalle['tipo'] == 'Mesa' ? 'chair' : 'shopping-bag'; ?>"></i> Tipo:</strong> 
+                        <span class="badge badge-<?php echo $pedido_detalle['tipo'] == 'Mesa' ? 'primary' : 'warning'; ?>">
+                            <?php echo $pedido_detalle['tipo'] == 'Mesa' ? 'En Mesa' : 'Para Llevar'; ?>
+                        </span>
+                    </p>
+                    <?php if ($pedido_detalle['tipo'] == 'Mesa'): ?>
                     <p><strong><i class="fas fa-chair"></i> Mesa:</strong> <?php echo $pedido_detalle['mesa_numero'] ?: 'N/A'; ?> <?php echo $pedido_detalle['mesa_ubicacion'] ? '(' . $pedido_detalle['mesa_ubicacion'] . ')' : ''; ?></p>
-                    <p><strong><i class="fas fa-tag"></i> Tipo:</strong> <span class="badge badge-<?php echo $pedido_detalle['tipo'] == 'Mesa' ? 'primary' : ($pedido_detalle['tipo'] == 'Domicilio' ? 'info' : 'warning'); ?>"><?php echo $pedido_detalle['tipo']; ?></span></p>
+                    <?php endif; ?>
                     <p><strong><i class="fas fa-calendar"></i> Fecha:</strong> <?php echo formatDate($pedido_detalle['fecha_pedido']); ?></p>
                 </div>
             </div>

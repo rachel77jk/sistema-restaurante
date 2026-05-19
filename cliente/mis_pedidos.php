@@ -1,7 +1,7 @@
 <?php
 /**
- * MIS PEDIDOS - Restaurante Inteligente v4
- * IMPORTANTE: Todo el procesamiento GET/POST debe ir ANTES de header_cliente.php
+ * MIS PEDIDOS - Restaurante Inteligente v5 (Simplificado)
+ * Solo pedidos para llevar del cliente
  */
 require_once '../includes/config.php';
 
@@ -11,9 +11,7 @@ if (!isLoggedIn() || !hasRole('Cliente')) {
 
 $db = getDB();
 
-// ============================================================
-// PROCESAMIENTO GET (ANTES de cualquier output)
-// ============================================================
+// Cancelar pedido
 if (isset($_GET['cancelar'])) {
     $id = intval($_GET['cancelar']);
     $stmt = $db->prepare("UPDATE pedidos SET estado = 'Cancelado' WHERE id = ? AND cliente_id = ? AND estado = 'Pendiente'");
@@ -25,15 +23,12 @@ if (isset($_GET['cancelar'])) {
     }
 }
 
-// ============================================================
-// AQUI EMPIEZA EL OUTPUT HTML
-// ============================================================
 $pageTitle = 'Mis Pedidos';
 require_once 'header_cliente.php';
 
-// Obtener pedidos del cliente
+// Obtener SOLO pedidos para llevar del cliente
 $estado_filter = $_GET['estado'] ?? '';
-$sql = "SELECT p.*, m.numero as mesa_numero FROM pedidos p LEFT JOIN mesas m ON p.mesa_id = m.id WHERE p.cliente_id = ?";
+$sql = "SELECT p.* FROM pedidos p WHERE p.cliente_id = ? AND p.tipo = 'ParaLlevar'";
 $params = [$_SESSION['usuario_id']];
 
 if (!empty($estado_filter)) {
@@ -47,7 +42,7 @@ $pedidos = $result['data'];
 ?>
 
 <div style="padding: 2rem; max-width: 1200px; margin: 0 auto;">
-    <h1 class="page-title"><i class="fas fa-clipboard-list"></i> Mis Pedidos</h1>
+    <h1 class="page-title"><i class="fas fa-shopping-bag"></i> Mis Pedidos para Llevar</h1>
     <p class="page-subtitle">Historial de tus pedidos</p>
 
     <div class="card mb-3">
@@ -75,8 +70,6 @@ $pedidos = $result['data'];
                     <thead>
                         <tr>
                             <th>Pedido #</th>
-                            <th>Tipo</th>
-                            <th>Mesa</th>
                             <th>Total</th>
                             <th>Estado</th>
                             <th>Fecha</th>
@@ -87,17 +80,10 @@ $pedidos = $result['data'];
                         <?php foreach ($pedidos as $p): ?>
                         <tr>
                             <td><strong>#<?php echo $p['id']; ?></strong></td>
-                            <td>
-                                <span class="badge badge-<?php echo $p['tipo'] == 'Mesa' ? 'primary' : ($p['tipo'] == 'Domicilio' ? 'info' : 'warning'); ?>">
-                                    <i class="fas fa-<?php echo $p['tipo'] == 'Mesa' ? 'chair' : ($p['tipo'] == 'Domicilio' ? 'motorcycle' : 'shopping-bag'); ?>"></i>
-                                    <?php echo $p['tipo']; ?>
-                                </span>
-                            </td>
-                            <td><?php echo $p['mesa_numero'] ?: 'N/A'; ?></td>
                             <td><strong class="text-primary"><?php echo formatMoney($p['total']); ?></strong></td>
                             <td>
                                 <span class="badge <?php echo getEstadoBadge($p['estado']); ?>">
-                                    <?php echo $p['estado']; ?>
+                                    <i class="fas fa-shopping-bag"></i> <?php echo $p['estado']; ?>
                                 </span>
                             </td>
                             <td><?php echo formatDate($p['fecha_pedido']); ?></td>
@@ -116,8 +102,8 @@ $pedidos = $result['data'];
 
             <?php if (empty($pedidos)): ?>
             <div class="empty-state">
-                <i class="fas fa-inbox"></i>
-                <h3>No tienes pedidos aun</h3>
+                <i class="fas fa-shopping-bag"></i>
+                <h3>No tienes pedidos para llevar aun</h3>
                 <a href="menu.php" class="btn btn-primary mt-2"><i class="fas fa-utensils"></i> Ver Menu</a>
             </div>
             <?php endif; ?>

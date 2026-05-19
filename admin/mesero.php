@@ -32,9 +32,10 @@ if (isset($_GET['entregar']) && isset($_GET['id'])) {
     }
 }
 
-// Crear pedido rapido desde mesero
+// Crear pedido desde mesero
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['nuevo_pedido'])) {
     $mesa_id = intval($_POST['mesa_id'] ?? 0);
+    $cliente_id = !empty($_POST['cliente_id']) ? intval($_POST['cliente_id']) : null;
     $tipo = sanitize($_POST['tipo'] ?? 'Mesa');
     $notas = sanitize($_POST['notas'] ?? '');
     $productos_pedido = $_POST['productos'] ?? [];
@@ -42,6 +43,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['nuevo_pedido'])) {
 
     if (empty($productos_pedido)) {
         redirect('mesero.php', 'error', 'Debe seleccionar al menos un producto');
+    }
+
+    // Validar que se seleccione cliente
+    if (empty($cliente_id)) {
+        redirect('mesero.php', 'error', 'Debe seleccionar un cliente');
+    }
+
+    // Validar mesa si es tipo Mesa
+    if ($tipo == 'Mesa' && empty($mesa_id)) {
+        redirect('mesero.php', 'error', 'Debe seleccionar una mesa para pedidos en mesa');
     }
 
     $total = 0;
@@ -65,8 +76,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['nuevo_pedido'])) {
     }
 
     if (!empty($items)) {
-        $stmt = $db->prepare("INSERT INTO pedidos (cliente_id, mesa_id, tipo, total, notas) VALUES (NULL, ?, ?, ?, ?)");
-        $stmt->execute([$mesa_id > 0 ? $mesa_id : null, $tipo, $total, $notas]);
+        $stmt = $db->prepare("INSERT INTO pedidos (cliente_id, mesa_id, tipo, total, notas) VALUES (?, ?, ?, ?, ?)");
+        $stmt->execute([$cliente_id, $mesa_id > 0 ? $mesa_id : null, $tipo, $total, $notas]);
         $pedido_id = $db->lastInsertId();
 
         foreach ($items as $item) {
@@ -74,7 +85,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['nuevo_pedido'])) {
             $stmt->execute([$pedido_id, $item['id'], $item['cantidad'], $item['precio'], $item['subtotal']]);
         }
 
-        if ($mesa_id > 0) {
+        if ($mesa_id > 0 && $tipo == 'Mesa') {
             $db->prepare("UPDATE mesas SET estado = 'Ocupada' WHERE id = ?")->execute([$mesa_id]);
         }
 
@@ -118,6 +129,7 @@ $listos = count($pedidos_listos);
 // Datos para nuevo pedido
 $productos = $db->query("SELECT p.id, p.nombre, p.precio, c.nombre as categoria FROM productos p JOIN categorias c ON p.categoria_id = c.id WHERE p.disponible = 1 ORDER BY c.nombre, p.nombre")->fetchAll();
 $mesas_disponibles = $db->query("SELECT id, numero, capacidad, ubicacion FROM mesas WHERE estado = 'Disponible' ORDER BY numero")->fetchAll();
+$clientes = $db->query("SELECT id, nombre, telefono FROM usuarios WHERE rol = 'Cliente' AND activo = 1 ORDER BY nombre")->fetchAll();
 ?>
 
 <style>
@@ -143,6 +155,12 @@ $mesas_disponibles = $db->query("SELECT id, numero, capacidad, ubicacion FROM me
     font-size: 1.1rem;
     color: var(--color-secondary);
     margin: 0.5rem 0;
+}
+.entrega-card .cliente {
+    font-size: 0.95rem;
+    color: var(--color-secondary);
+    margin: 0.3rem 0;
+    font-weight: 600;
 }
 .entrega-card .tipo {
     font-size: 0.9rem;
@@ -208,6 +226,14 @@ $mesas_disponibles = $db->query("SELECT id, numero, capacidad, ubicacion FROM me
     border-color: var(--color-success);
     background: rgba(39, 174, 96, 0.1);
 }
+
+/* Estilo para el selector de cliente */
+.cliente-select-group {
+    position: relative;
+}
+.cliente-select-group .form-control {
+    padding-right: 40px;
+}
 </style>
 
 <h1 class="page-title"><i class="fas fa-concierge-bell"></i> Panel de Mesero</h1>
@@ -249,22 +275,20 @@ $mesas_disponibles = $db->query("SELECT id, numero, capacidad, ubicacion FROM me
         </div>
         <div class="card-body">
             <?php if (!empty($pedidos_listos)): ?>
-            <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 1rem;">
+            <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 1rem;">
                 <?php foreach ($pedidos_listos as $p): ?>
                 <div class="entrega-card" onclick="if(confirm('Marcar pedido #<?php echo $p['id']; ?> como entregado?')) location.href='mesero.php?entregar=1&id=<?php echo $p['id']; ?>'">
                     <div class="numero">#<?php echo $p['id']; ?></div>
+                    <div class="cliente">
+                        <i class="fas fa-user"></i> <?php echo $p['cliente_nombre'] ?: 'Sin cliente'; ?>
+                    </div>
                     <div class="mesa">
-                        <i class="fas fa-chair"></i> <?php echo $p['mesa_numero'] ?: 'Sin mesa'; ?>
+                        <i class="fas fa-<?php echo $p['tipo'] == 'Mesa' ? 'chair' : 'shopping-bag'; ?>"></i> 
+                        <?php echo $p['tipo'] == 'Mesa' ? ($p['mesa_numero'] ?: 'Sin mesa') : 'Para Llevar'; ?>
                     </div>
                     <div class="tipo">
-                        <i class="fas fa-<?php echo $p['tipo'] == 'Mesa' ? 'chair' : ($p['tipo'] == 'Domicilio' ? 'motorcycle' : 'shopping-bag'); ?>"></i>
-                        <?php echo $p['tipo']; ?> | <?php echo formatMoney($p['total']); ?>
+                        <?php echo formatMoney($p['total']); ?>
                     </div>
-                    <?php if ($p['cliente_nombre']): ?>
-                    <div style="margin-top: 0.5rem; font-size: 0.85rem; color: var(--color-gray);">
-                        <i class="fas fa-user"></i> <?php echo $p['cliente_nombre']; ?>
-                    </div>
-                    <?php endif; ?>
                     <button class="btn btn-success btn-sm" style="margin-top: 1rem; width: 100%;" onclick="event.stopPropagation(); if(confirm('Marcar pedido #<?php echo $p['id']; ?> como entregado?')) location.href='mesero.php?entregar=1&id=<?php echo $p['id']; ?>'">
                         <i class="fas fa-hand-holding"></i> Entregar
                     </button>
@@ -281,33 +305,55 @@ $mesas_disponibles = $db->query("SELECT id, numero, capacidad, ubicacion FROM me
         </div>
     </div>
 
-    <!-- Nuevo Pedido Rapido -->
+    <!-- Nuevo Pedido -->
     <div class="card">
         <div class="card-header">
-            <h3><i class="fas fa-plus-circle"></i> Nuevo Pedido Rapido</h3>
+            <h3><i class="fas fa-plus-circle"></i> Nuevo Pedido</h3>
         </div>
         <div class="card-body">
-            <form method="POST" id="pedidoRapidoForm">
+            <form method="POST" id="pedidoForm">
                 <input type="hidden" name="nuevo_pedido" value="1">
 
-                <div class="grid grid-2 mb-2">
-                    <div class="form-group">
-                        <label class="form-label">Tipo</label>
-                        <select name="tipo" class="form-control" id="tipoPedido" onchange="toggleMesaRapido()">
-                            <option value="Mesa">En Mesa</option>
-                            <option value="Domicilio">Domicilio</option>
-                            <option value="ParaLlevar">Para Llevar</option>
-                        </select>
+                <!-- Tipo de pedido -->
+                <div class="form-group">
+                    <label class="form-label">Tipo de Pedido *</label>
+                    <div style="display: flex; gap: 1rem;">
+                        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 10px 20px; border: 2px solid var(--color-border); border-radius: var(--radius-sm); flex: 1; justify-content: center; transition: var(--transition);" id="labelMesa" onclick="seleccionarTipo('Mesa')">
+                            <input type="radio" name="tipo" value="Mesa" id="tipoMesa" checked style="width: auto;" onchange="cambiarTipo()">
+                            <i class="fas fa-chair"></i> En Mesa
+                        </label>
+                        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 10px 20px; border: 2px solid var(--color-border); border-radius: var(--radius-sm); flex: 1; justify-content: center; transition: var(--transition);" id="labelLlevar" onclick="seleccionarTipo('ParaLlevar')">
+                            <input type="radio" name="tipo" value="ParaLlevar" id="tipoLlevar" style="width: auto;" onchange="cambiarTipo()">
+                            <i class="fas fa-shopping-bag"></i> Para Llevar
+                        </label>
                     </div>
-                    <div class="form-group" id="mesaRapidoGroup">
-                        <label class="form-label">Mesa</label>
-                        <select name="mesa_id" class="form-control">
-                            <option value="">Seleccione...</option>
-                            <?php foreach ($mesas_disponibles as $m): ?>
-                            <option value="<?php echo $m['id']; ?>"><?php echo $m['numero']; ?> - <?php echo $m['ubicacion']; ?></option>
-                            <?php endforeach; ?>
-                        </select>
-                    </div>
+                </div>
+
+                <!-- Cliente -->
+                <div class="form-group">
+                    <label class="form-label">Cliente *</label>
+                    <select name="cliente_id" class="form-control" required>
+                        <option value="">Seleccione un cliente...</option>
+                        <?php foreach ($clientes as $c): ?>
+                        <option value="<?php echo $c['id']; ?>">
+                            <?php echo $c['nombre']; ?> 
+                            <?php if ($c['telefono']): ?>| <?php echo $c['telefono']; ?><?php endif; ?>
+                        </option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+
+                <!-- Mesa (solo para tipo Mesa) -->
+                <div class="form-group" id="mesaGroup">
+                    <label class="form-label">Mesa *</label>
+                    <select name="mesa_id" class="form-control" id="mesaSelect">
+                        <option value="">Seleccione una mesa...</option>
+                        <?php foreach ($mesas_disponibles as $m): ?>
+                        <option value="<?php echo $m['id']; ?>">
+                            <?php echo $m['numero']; ?> - <?php echo $m['ubicacion']; ?> (<?php echo $m['capacidad']; ?> pers.)
+                        </option>
+                        <?php endforeach; ?>
+                    </select>
                 </div>
 
                 <div class="form-group">
@@ -316,7 +362,7 @@ $mesas_disponibles = $db->query("SELECT id, numero, capacidad, ubicacion FROM me
                 </div>
 
                 <div class="form-group">
-                    <label class="form-label">Seleccionar Productos</label>
+                    <label class="form-label">Seleccionar Productos *</label>
                     <div class="pedido-rapido-grid" id="productosGrid">
                         <?php foreach ($productos as $prod): ?>
                         <div class="producto-check" data-id="<?php echo $prod['id']; ?>">
@@ -352,8 +398,7 @@ $mesas_disponibles = $db->query("SELECT id, numero, capacidad, ubicacion FROM me
                     <tr>
                         <th>#</th>
                         <th>Cliente</th>
-                        <th>Mesa</th>
-                        <th>Tipo</th>
+                        <th>Mesa/Tipo</th>
                         <th>Total</th>
                         <th>Estado</th>
                         <th>Tiempo</th>
@@ -365,9 +410,13 @@ $mesas_disponibles = $db->query("SELECT id, numero, capacidad, ubicacion FROM me
                     ?>
                     <tr>
                         <td><strong>#<?php echo $p['id']; ?></strong></td>
-                        <td><?php echo $p['cliente_nombre'] ?: '-'; ?></td>
-                        <td><?php echo $p['mesa_numero'] ?: 'N/A'; ?></td>
-                        <td><span class="badge badge-<?php echo $p['tipo'] == 'Mesa' ? 'primary' : ($p['tipo'] == 'Domicilio' ? 'info' : 'warning'); ?>"><?php echo $p['tipo']; ?></span></td>
+                        <td><i class="fas fa-user"></i> <?php echo $p['cliente_nombre'] ?: '-'; ?></td>
+                        <td>
+                            <span class="badge badge-<?php echo $p['tipo'] == 'Mesa' ? 'primary' : 'warning'; ?>">
+                                <i class="fas fa-<?php echo $p['tipo'] == 'Mesa' ? 'chair' : 'shopping-bag'; ?>"></i>
+                                <?php echo $p['tipo'] == 'Mesa' ? ($p['mesa_numero'] ?: 'Sin mesa') : 'Para Llevar'; ?>
+                            </span>
+                        </td>
                         <td><strong><?php echo formatMoney($p['total']); ?></strong></td>
                         <td><span class="badge <?php echo getEstadoBadge($p['estado']); ?>"><?php echo $p['estado']; ?></span></td>
                         <td class="<?php echo $minutos > 20 ? 'text-danger' : ''; ?>" style="font-weight: <?php echo $minutos > 20 ? '700' : '400'; ?>;">
@@ -388,15 +437,43 @@ $mesas_disponibles = $db->query("SELECT id, numero, capacidad, ubicacion FROM me
 </div>
 
 <script>
-function toggleMesaRapido() {
-    var tipo = document.getElementById('tipoPedido').value;
-    document.getElementById('mesaRapidoGroup').style.display = tipo === 'Mesa' ? 'block' : 'none';
+function seleccionarTipo(tipo) {
+    document.getElementById('tipoMesa').checked = (tipo === 'Mesa');
+    document.getElementById('tipoLlevar').checked = (tipo === 'ParaLlevar');
+    cambiarTipo();
 }
+
+function cambiarTipo() {
+    var esMesa = document.getElementById('tipoMesa').checked;
+    var mesaGroup = document.getElementById('mesaGroup');
+    var mesaSelect = document.getElementById('mesaSelect');
+    var labelMesa = document.getElementById('labelMesa');
+    var labelLlevar = document.getElementById('labelLlevar');
+
+    if (esMesa) {
+        mesaGroup.style.display = 'block';
+        mesaSelect.setAttribute('required', 'required');
+        labelMesa.style.borderColor = 'var(--color-primary)';
+        labelMesa.style.background = 'rgba(230, 126, 34, 0.1)';
+        labelLlevar.style.borderColor = 'var(--color-border)';
+        labelLlevar.style.background = 'transparent';
+    } else {
+        mesaGroup.style.display = 'none';
+        mesaSelect.removeAttribute('required');
+        mesaSelect.value = '';
+        labelLlevar.style.borderColor = 'var(--color-primary)';
+        labelLlevar.style.background = 'rgba(230, 126, 34, 0.1)';
+        labelMesa.style.borderColor = 'var(--color-border)';
+        labelMesa.style.background = 'transparent';
+    }
+}
+
+// Inicializar estado
+cambiarTipo();
 
 // Seleccion de productos con click en la tarjeta
 document.querySelectorAll('.producto-check').forEach(function(div) {
     div.addEventListener('click', function(e) {
-        // No activar si se hizo click en el input number o checkbox directamente
         if (e.target.type === 'number' || e.target.type === 'checkbox') {
             if (e.target.type === 'checkbox') {
                 this.classList.toggle('selected', e.target.checked);
@@ -411,11 +488,22 @@ document.querySelectorAll('.producto-check').forEach(function(div) {
 });
 
 // Validar formulario
-document.getElementById('pedidoRapidoForm').addEventListener('submit', function(e) {
+document.getElementById('pedidoForm').addEventListener('submit', function(e) {
     var checked = this.querySelectorAll('input[name="productos[]"]:checked');
     if (checked.length === 0) {
         e.preventDefault();
         alert('Debe seleccionar al menos un producto');
+        return false;
+    }
+    
+    var tipo = document.getElementById('tipoMesa').checked ? 'Mesa' : 'ParaLlevar';
+    if (tipo === 'Mesa') {
+        var mesa = document.getElementById('mesaSelect').value;
+        if (!mesa) {
+            e.preventDefault();
+            alert('Debe seleccionar una mesa para pedidos en mesa');
+            return false;
+        }
     }
 });
 

@@ -137,6 +137,15 @@ if ($current_page == 'dashboard' && !hasRole('Administrador')) {
             </li>
             <?php endif; ?>
 
+            <?php if (hasRole('Administrador')): ?>
+            <li>
+                <a href="backup.php" class="<?php echo $current_page == 'backup' ? 'active' : ''; ?>">
+                    <i class="fas fa-database"></i>
+                    <span>Respaldo BD</span>
+                </a>
+            </li>
+            <?php endif; ?>
+
             <li style="margin-top: 2rem; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 1rem;">
                 <a href="../cliente/menu.php" target="_blank">
                     <i class="fas fa-external-link-alt"></i>
