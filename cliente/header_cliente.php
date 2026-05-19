@@ -1,6 +1,6 @@
 <?php
 /**
- * HEADER CLIENTE - Restaurante Inteligente v5
+ * HEADER CLIENTE - Restaurante Inteligente v6
  * Solo visualizacion de menu publico
  */
 require_once '../includes/config.php';
@@ -193,9 +193,6 @@ $current_page_name = basename($_SERVER['PHP_SELF'], '.php');
 
         <nav class="client-nav">
             <a href="menu.php" class="<?php echo $current_page_name == 'menu' ? 'active' : ''; ?>"><i class="fas fa-utensils"></i> Menu</a>
-            <?php if (isLoggedIn() && hasRole('Cliente')): ?>
-            <a href="mis_pedidos.php" class="<?php echo $current_page_name == 'mis_pedidos' ? 'active' : ''; ?>"><i class="fas fa-shopping-bag"></i> Mis Pedidos</a>
-            <?php endif; ?>
         </nav>
 
         <div>
@@ -208,7 +205,6 @@ $current_page_name = basename($_SERVER['PHP_SELF'], '.php');
                     <i class="fas fa-chevron-down" style="font-size: 0.7rem;"></i>
                 </button>
                 <div class="user-dropdown" id="userDropdown">
-                    <a href="mis_pedidos.php"><i class="fas fa-shopping-bag"></i> Mis Pedidos</a>
                     <a href="acerca.php"><i class="fas fa-info-circle"></i> Acerca de</a>
                     <div style="border-top: 1px solid var(--color-border);"></div>
                     <a href="logout.php" class="logout-item"><i class="fas fa-sign-out-alt"></i> Cerrar Sesion</a>
